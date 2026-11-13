@@ -12,7 +12,7 @@ constexpr int kGridTop = 56;
 constexpr int kGridSize = kWidth - 2 * kMargin; // 488
 constexpr float kGap = 2.0f;
 
-const char* const kKnobLabels[8] = { "Mix", "Quant", "Release", "Glide", "Drive", "Tone", "Pitch", "Out" };
+const char* const kKnobLabels[8] = { "Mix", "Quant", "Release", "Glide", "Drive", "Hold", "Pitch", "Out" };
 
 Font monoFont (float height)
 {
@@ -106,10 +106,12 @@ bool PadGrid::refreshState()
     {
         const int c = processor.displayCol[(size_t) r].load();
         const int p = processor.displayPending[(size_t) r].load();
-        if (c != shownCol[(size_t) r] || p != shownPending[(size_t) r])
+        const bool h = processor.displayHolding[(size_t) r].load();
+        if (c != shownCol[(size_t) r] || p != shownPending[(size_t) r] || h != shownHolding[(size_t) r])
         {
             shownCol[(size_t) r] = c;
             shownPending[(size_t) r] = p;
+            shownHolding[(size_t) r] = h;
             changed = true;
         }
     }
@@ -132,6 +134,12 @@ void PadGrid::paint (Graphics& g)
 
             g.setColour (on ? Colours::white : groupColour (group));
             g.fillRect (b);
+
+            if (on && shownHolding[(size_t) r])
+            {
+                g.setColour (ec::pink);
+                g.drawRect (b.reduced (1.0f), 3.0f);
+            }
 
             if (pending && ! on)
             {

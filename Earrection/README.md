@@ -26,7 +26,7 @@ Die Effekte sind von oben nach unten hintereinandergeschaltet. Alles läuft sync
 | Release | Wie lange der Effekt nach dem Loslassen ausklingt (Echos klingen natürlich aus) |
 | Glide | Wie weich ein Effekt einsetzt und zwischen Spalten überblendet |
 | Drive | Sättigung des Effektsignals |
-| Tone | Effektsignal dunkler (links) oder heller (rechts) |
+| Hold | **Hold Last**: Wenn du ein Pad loslässt oder zu einem anderen wechselst, läuft das alte noch so lange weiter (Aus · 1/4 Takt · 1/2 Takt · 1 Takt · 2 Takte · 4 Takte). Ganz links steht Aus. In derselben Zeile wird sofort gewechselt. Ein nachlaufendes Pad hat einen pinken Rand. |
 | Pitch | Tonhöhe von Stutter, Repeat, Reverse und Granular (±12 Halbtöne) |
 | Out | Ausgangslautstärke |
 

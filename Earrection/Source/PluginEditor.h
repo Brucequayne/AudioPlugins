@@ -47,6 +47,7 @@ private:
 
     EarrectionProcessor& processor;
     std::array<int, earr::kRows> shownCol {}, shownPending {};
+    std::array<bool, earr::kRows> shownHolding {};
     Cell lastCell;
 };
 

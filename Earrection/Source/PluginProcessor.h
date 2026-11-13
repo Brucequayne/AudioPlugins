@@ -45,6 +45,7 @@ public:
     // Fuer die Anzeige: aktive bzw. wartende Spalte pro Zeile (-1 = keine)
     std::array<std::atomic<int>, earr::kRows> displayCol;
     std::array<std::atomic<int>, earr::kRows> displayPending;
+    std::array<std::atomic<bool>, earr::kRows> displayHolding; // laeuft im Hold-Last-Nachlauf
 
     static const char* const paramIds[8];
 
@@ -59,6 +60,8 @@ private:
         int pendCol = -1;
         float pendVel = 1.0f;
         double pendBeat = 0.0;
+        double offBeat = -1.0;     // Hold Last: Ausschaltzeitpunkt, -1 = keiner
+        bool pendRelease = false;  // losgelassen, bevor das Pad gestartet ist
     };
 
     void timerCallback() override;
@@ -67,6 +70,7 @@ private:
     void padOff (int row, int col);
     void applyOn (int row, int col, float vel);
     void applyOff (int row);
+    double holdEndFrom (double fromBeat) const;
     void clearAll();
     void handleMidi (const juce::MidiMessage& m);
 
@@ -77,6 +81,7 @@ private:
     uint32_t orderCounter = 0;
     double beatPos = 0.0;
     double quantBeats = 0.25;
+    double holdBeats = 0.0;
     bool latch = false, lastLatch = false, velocityOn = false;
     double currentSampleRate = 44100.0;
 
@@ -93,7 +98,7 @@ private:
     std::atomic<float>* pRelease = nullptr;
     std::atomic<float>* pGlide = nullptr;
     std::atomic<float>* pDrive = nullptr;
-    std::atomic<float>* pTone = nullptr;
+    std::atomic<float>* pHold = nullptr;
     std::atomic<float>* pPitch = nullptr;
     std::atomic<float>* pOutput = nullptr;
     std::atomic<float>* pLatch = nullptr;

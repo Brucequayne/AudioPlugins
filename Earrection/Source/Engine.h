@@ -701,7 +701,7 @@ class Engine
 public:
     struct Globals
     {
-        float mix = 1.0f, drive = 0.0f, tone = 0.0f, outGain = 1.0f;
+        float mix = 1.0f, drive = 0.0f, outGain = 1.0f;
         double attackSamples = 128.0, releaseSamples = 512.0;
     };
 
@@ -722,8 +722,6 @@ public:
         active.fill (false);
         amount.fill (0.0f);
         target.fill (1.0f);
-        toneLpL = toneLpR = 0.0f;
-        toneCoef = 1.0f - std::exp (-2.0f * juce::MathConstants<float>::pi * 900.0f / (float) sr);
     }
 
     void trigger (int row, int col, float vel, const Context& c)
@@ -773,32 +771,12 @@ public:
             activity = std::max (activity, amount[i]);
         }
 
-        // Tone (Kippfilter) – laeuft immer, damit kein Knacken entsteht
-        toneLpL += (l - toneLpL) * toneCoef;
-        toneLpR += (r - toneLpR) * toneCoef;
-
-        if (activity > 0.0f)
+        if (activity > 0.0f && g.drive > 0.001f)
         {
-            float cl = l, cr = r;
-            if (g.tone >= 0.0f)
-            {
-                cl += (l - toneLpL) * g.tone * 1.5f;
-                cr += (r - toneLpR) * g.tone * 1.5f;
-            }
-            else
-            {
-                cl += (toneLpL - l) * -g.tone;
-                cr += (toneLpR - r) * -g.tone;
-            }
-
-            if (g.drive > 0.001f)
-            {
-                const float k = 1.0f + g.drive * 7.0f;
-                const float comp = 1.0f / std::sqrt (k);
-                cl = std::tanh (cl * k) * comp;
-                cr = std::tanh (cr * k) * comp;
-            }
-
+            const float k = 1.0f + g.drive * 7.0f;
+            const float comp = 1.0f / std::sqrt (k);
+            const float cl = std::tanh (l * k) * comp;
+            const float cr = std::tanh (r * k) * comp;
             l += (cl - l) * activity;
             r += (cr - r) * activity;
         }
@@ -812,7 +790,6 @@ private:
     std::array<std::unique_ptr<Row>, kRows> rows;
     std::array<bool, kRows> active {};
     std::array<float, kRows> amount {}, target {};
-    float toneLpL = 0.0f, toneLpR = 0.0f, toneCoef = 0.1f;
 };
 
 } // namespace earr

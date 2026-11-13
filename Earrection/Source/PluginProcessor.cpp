@@ -3,11 +3,12 @@
 
 using namespace juce;
 
-const char* const EarrectionProcessor::paramIds[8] = { "mix", "quant", "release", "glide", "drive", "tone", "pitch", "output" };
+const char* const EarrectionProcessor::paramIds[8] = { "mix", "quant", "release", "glide", "drive", "hold", "pitch", "output" };
 
 namespace
 {
 const double kQuantBeats[] = { 0.0, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0 };
+const double kHoldBeats[] = { 0.0, 1.0, 2.0, 4.0, 8.0, 16.0 };
 
 double releaseMs (float v) { return 5.0 * std::pow (800.0, (double) v); }
 double glideMs (float v)   { return 2.0 * std::pow (250.0, (double) v); }
@@ -42,13 +43,8 @@ AudioProcessorValueTreeState::ParameterLayout createLayout()
         NormalisableRange<float> (0.0f, 1.0f), 0.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
 
-    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "tone", 1 }, "Tone",
-        NormalisableRange<float> (-1.0f, 1.0f), 0.0f,
-        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
-        {
-            const int p = roundToInt (v * 100.0f);
-            return p == 0 ? String ("neutral") : (p > 0 ? "hell +" + String (p) : "dunkel " + String (p));
-        })));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "hold", 1 }, "Hold Last",
+        StringArray { "Aus", "1/4 Takt", "1/2 Takt", "1 Takt", "2 Takte", "4 Takte" }, 0));
 
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "pitch", 1 }, "Pitch",
         NormalisableRange<float> (-12.0f, 12.0f, 1.0f), 0.0f,
@@ -81,6 +77,7 @@ EarrectionProcessor::EarrectionProcessor()
 {
     for (auto& d : displayCol) d.store (-1);
     for (auto& d : displayPending) d.store (-1);
+    for (auto& d : displayHolding) d.store (false);
     for (auto& e : encoderDelta) e.store (0);
 
     pMix      = apvts.getRawParameterValue ("mix");
@@ -88,7 +85,7 @@ EarrectionProcessor::EarrectionProcessor()
     pRelease  = apvts.getRawParameterValue ("release");
     pGlide    = apvts.getRawParameterValue ("glide");
     pDrive    = apvts.getRawParameterValue ("drive");
-    pTone     = apvts.getRawParameterValue ("tone");
+    pHold     = apvts.getRawParameterValue ("hold");
     pPitch    = apvts.getRawParameterValue ("pitch");
     pOutput   = apvts.getRawParameterValue ("output");
     pLatch    = apvts.getRawParameterValue ("latch");
@@ -139,6 +136,8 @@ void EarrectionProcessor::padOn (int row, int col, float vel)
 {
     auto& p = pads[(size_t) row];
     const float v = velocityOn ? vel : 1.0f;
+    p.offBeat = -1.0;
+    p.pendRelease = false;
 
     if (latch)
     {
@@ -169,8 +168,25 @@ void EarrectionProcessor::padOff (int row, int col)
         return;
 
     auto& p = pads[(size_t) row];
+
+    if (holdBeats > 0.0)
+    {
+        // Hold Last: Pad laeuft noch die eingestellte Zeit weiter
+        if (p.pendCol == col) { p.pendRelease = true; return; }
+        if (p.col == col) p.offBeat = holdEndFrom (beatPos);
+        return;
+    }
+
     if (p.pendCol == col) p.pendCol = -1;
     if (p.col == col) applyOff (row);
+}
+
+double EarrectionProcessor::holdEndFrom (double fromBeat) const
+{
+    double end = fromBeat + holdBeats;
+    if (quantBeats > 0.0)
+        end = std::ceil (end / quantBeats - 1.0e-6) * quantBeats;
+    return end;
 }
 
 void EarrectionProcessor::applyOn (int row, int col, float vel)
@@ -202,6 +218,8 @@ void EarrectionProcessor::applyOn (int row, int col, float vel)
 void EarrectionProcessor::applyOff (int row)
 {
     pads[(size_t) row].col = -1;
+    pads[(size_t) row].offBeat = -1.0;
+    pads[(size_t) row].pendRelease = false;
     engine.release (row);
 }
 
@@ -250,7 +268,7 @@ void EarrectionProcessor::handleMidi (const MidiMessage& m)
 
 void EarrectionProcessor::timerCallback()
 {
-    static const float sensitivity[8] = { 0.006f, 0.03f, 0.006f, 0.006f, 0.006f, 0.006f, 0.012f, 0.006f };
+    static const float sensitivity[8] = { 0.006f, 0.03f, 0.006f, 0.006f, 0.006f, 0.04f, 0.012f, 0.006f };
 
     for (int i = 0; i < 8; ++i)
     {
@@ -300,6 +318,7 @@ void EarrectionProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& 
     // Parameter
     const int quantIndex = jlimit (0, 6, (int) pQuant->load());
     quantBeats = kQuantBeats[quantIndex];
+    holdBeats = kHoldBeats[jlimit (0, 5, (int) pHold->load())];
     latch = pLatch->load() > 0.5f;
     velocityOn = pVelocity->load() > 0.5f;
     if (lastLatch && ! latch)
@@ -314,7 +333,6 @@ void EarrectionProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& 
     earr::Engine::Globals g;
     g.mix = pMix->load();
     g.drive = pDrive->load();
-    g.tone = pTone->load();
     g.attackSamples = std::max (0.001 * currentSampleRate, ctx.glideSamples);
     g.releaseSamples = releaseMs (pRelease->load()) * 0.001 * currentSampleRate;
     outGainSmoothed.setTargetValue (Decibels::decibelsToGain (pOutput->load()));
@@ -362,9 +380,23 @@ void EarrectionProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& 
             if (due || jumped)
             {
                 const int c = p.pendCol;
+                const bool releaseLater = p.pendRelease;
                 p.pendCol = -1;
                 applyOn (r, c, p.pendVel);
+                if (releaseLater)
+                    p.offBeat = holdEndFrom (beatPos);
             }
+        }
+
+        // Hold Last abgelaufen?
+        for (int r = 0; r < earr::kRows; ++r)
+        {
+            auto& p = pads[(size_t) r];
+            if (p.col < 0 || p.offBeat < 0.0) continue;
+            const bool due = beatPos >= p.offBeat - 1.0e-9;
+            const bool jumped = (p.offBeat - beatPos) > holdBeats + quantBeats + 1.0e-6;
+            if (due || jumped)
+                applyOff (r);
         }
 
         float l = left[i];
@@ -392,6 +424,7 @@ void EarrectionProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& 
     {
         displayCol[(size_t) r].store (pads[(size_t) r].col);
         displayPending[(size_t) r].store (pads[(size_t) r].pendCol);
+        displayHolding[(size_t) r].store (pads[(size_t) r].offBeat >= 0.0);
     }
 }
 

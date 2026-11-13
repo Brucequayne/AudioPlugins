@@ -1,0 +1,83 @@
+name: Plugins bauen
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+          - os: macos-latest
+            name: Mac
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Konfigurieren
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            cmake -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+          else
+            cmake -B build -DCMAKE_BUILD_TYPE=Release
+          fi
+
+      - name: Bauen
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Paket packen (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir dist
+          cd build/Earrection/Earrection_artefacts/Release/VST3
+          7z a -tzip "$GITHUB_WORKSPACE/dist/Earrection-Windows-VST3.zip" Earrection.vst3
+
+      - name: Paket packen (Mac)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir dist
+          ART=build/Earrection/Earrection_artefacts/Release
+          codesign --force --deep -s - "$ART/VST3/Earrection.vst3"
+          codesign --force --deep -s - "$ART/AU/Earrection.component"
+          mkdir -p pkg
+          cp -R "$ART/VST3/Earrection.vst3" pkg/
+          cp -R "$ART/AU/Earrection.component" pkg/
+          cd pkg && zip -r -y "$GITHUB_WORKSPACE/dist/Earrection-Mac-VST3-AU.zip" Earrection.vst3 Earrection.component
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Earrection-${{ matrix.name }}
+          path: dist/*.zip
+
+  release:
+    name: Download-Seite aktualisieren
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Release "earrection-latest" erneuern
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete earrection-latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create earrection-latest dist/*.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Earrection – neuester Build" \
+            --notes "Automatisch gebaut aus Branch ${GITHUB_REF_NAME} (${GITHUB_SHA::7}). Installation: siehe Earrection/README.md"
